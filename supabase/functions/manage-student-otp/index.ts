@@ -1,8 +1,109 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-const cors={"Access-Control-Allow-Origin":"*","Access-Control-Allow-Headers":"authorization, x-client-info, apikey, content-type"};
-const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const makeOtp=()=>{const b=crypto.getRandomValues(new Uint8Array(6));return Array.from(b,x=>chars[x%chars.length]).join("");};
-function client(){return createClient(Deno.env.get("SUPABASE_URL")!,Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,{auth:{autoRefreshToken:false,persistSession:false}});}
-async function caller(req:Request){const admin=client();const token=(req.headers.get("Authorization")||"").replace(/^Bearer\s+/i,"").trim();if(!token)throw new Error("Authentication required.");const {data:u,error:ue}=await admin.auth.getUser(token);if(ue||!u.user)throw new Error("Authentication required.");const {data:p,error:pe}=await admin.from("profiles").select("role,student_id,is_active").eq("id",u.user.id).single();if(pe||!p?.is_active)throw new Error("Active profile not found.");return {admin,user:u.user,profile:p};}
-async function ensure(admin:any,id:string,rotate=false){const {data:s,error:se}=await admin.from("students").select("id,reg_no,full_name,is_active").eq("id",id).single();if(se||!s?.is_active)throw new Error("Student record not found or inactive.");const today=new Date().toISOString().slice(0,10);const {data:e}=await admin.from("student_exam_otps").select("current_otp,otp_epoch,valid_for_date,issued_at").eq("student_id",id).maybeSingle();if(!rotate&&e?.current_otp&&e.valid_for_date===today)return {...s,otp:e.current_otp,issued_at:e.issued_at};const {data:au,error:ae}=await admin.auth.admin.getUserByEmail(`${s.reg_no.trim().toLowerCase()}@student.coht.local`);if(ae||!au.user)throw new Error(`Student Auth account was not found for ${s.reg_no}.`);const value=makeOtp();const {error:up}=await admin.auth.admin.updateUserById(au.user.id,{password:value});if(up)throw new Error(up.message);const {data:saved,error:save}=await admin.from("student_exam_otps").upsert({student_id:id,current_otp:value,otp_epoch:Number(e?.otp_epoch??0)+1,valid_for_date:today,issued_at:new Date().toISOString(),updated_at:new Date().toISOString()},{onConflict:"student_id"}).select("current_otp,issued_at").single();if(save)throw new Error(save.message);return {...s,otp:saved.current_otp,issued_at:saved.issued_at};}
-Deno.serve(async req=>{if(req.method==="OPTIONS")return new Response("ok",{headers:cors});try{const {admin,user,profile}=await caller(req);const b=await req.json();if(b.action==="rotate_current"){if(profile.role!=="student"||!profile.student_id)throw new Error("Student authorization required.");const r=await ensure(admin,profile.student_id,true);return new Response(JSON.stringify({otp:r.otp}),{headers:{...cors,"Content-Type":"application/json"}});}if(profile.role!=="superadmin")throw new Error("SuperAdmin authorization required.");if(b.action!=="ensure_current")throw new Error("Unsupported OTP operation.");const {data:list,error}=await admin.from("students").select("id,reg_no,full_name,programme_id,programmes(department_id)").eq("is_active",true).order("reg_no");if(error)throw new Error(error.message);const targets=(list??[]).filter((s:any)=>(b.studentId?s.id===String(b.studentId):b.departmentId?s.programmes?.department_id===String(b.departmentId):true));const out:any[]=[],failures:string[]=[];const q=[...targets];const worker=async()=>{while(q.length){const s=q.shift();if(!s)break;try{out.push(await ensure(admin,s.id,false));}catch(e){failures.push(`${s.reg_no}: ${e instanceof Error?e.message:"OTP generation failed"}`);}}};await Promise.all(Array.from({length:Math.min(8,Math.max(1,targets.length))},worker));return new Response(JSON.stringify({students:out,failures}),{headers:{...cors,"Content-Type":"application/json"}});}catch(e){return new Response(JSON.stringify({error:e instanceof Error?e.message:"OTP operation failed."}),{status:400,headers:{...cors,"Content-Type":"application/json"}});}});
+
+const cors = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...cors, "Content-Type": "application/json" },
+  });
+}
+
+function serviceClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+async function requireSuperAdmin(req: Request, admin: ReturnType<typeof serviceClient>) {
+  const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) throw new Error("Authentication required.");
+
+  const { data: userData, error: userError } = await admin.auth.getUser(token);
+  if (userError || !userData.user) throw new Error("Authentication required.");
+
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("role, is_active")
+    .eq("id", userData.user.id)
+    .single();
+
+  if (profileError || !profile?.is_active) throw new Error("Active profile not found.");
+  if (profile.role !== "superadmin") throw new Error("SuperAdmin authorization required.");
+}
+
+/**
+ * Returns the student's OTP for today, creating one when none exists for
+ * today. Generation and the Auth password update both happen inside
+ * public.rotate_student_otp, the same function the submission trigger uses.
+ */
+async function ensureCurrent(admin: ReturnType<typeof serviceClient>, student: { id: string; reg_no: string; full_name: string }) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: existing } = await admin
+    .from("student_exam_otps")
+    .select("current_otp, valid_for_date, issued_at")
+    .eq("student_id", student.id)
+    .maybeSingle();
+
+  if (existing?.current_otp && existing.valid_for_date === today) {
+    return { ...student, otp: existing.current_otp, issued_at: existing.issued_at };
+  }
+
+  const { data: otp, error } = await admin.rpc("rotate_student_otp", { p_student_id: student.id });
+  if (error) throw new Error(error.message);
+
+  return { ...student, otp: String(otp), issued_at: new Date().toISOString() };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+
+  try {
+    const admin = serviceClient();
+    await requireSuperAdmin(req, admin);
+
+    const body = await req.json();
+    if (body.action !== "ensure_current") throw new Error("Unsupported OTP operation.");
+
+    const { data: list, error } = await admin
+      .from("students")
+      .select("id, reg_no, full_name, programmes(department_id)")
+      .eq("is_active", true)
+      .order("reg_no");
+    if (error) throw new Error(error.message);
+
+    const targets = (list ?? []).filter((s: any) =>
+      body.studentId
+        ? s.id === String(body.studentId)
+        : body.departmentId
+          ? s.programmes?.department_id === String(body.departmentId)
+          : true,
+    );
+
+    const students: unknown[] = [];
+    const failures: string[] = [];
+    const queue = [...targets];
+
+    const worker = async () => {
+      while (queue.length) {
+        const s = queue.shift();
+        if (!s) break;
+        try {
+          students.push(await ensureCurrent(admin, s));
+        } catch (e) {
+          failures.push(`${s.reg_no}: ${e instanceof Error ? e.message : "OTP generation failed"}`);
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(8, Math.max(1, targets.length)) }, worker));
+
+    return json({ students, failures });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : "OTP operation failed." }, 400);
+  }
+});
