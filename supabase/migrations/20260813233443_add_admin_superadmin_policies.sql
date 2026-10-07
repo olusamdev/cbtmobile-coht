@@ -19,6 +19,7 @@
 -- 1. PROFILES
 -- ============================================================
 
+drop policy if exists profiles_admin_select on public.profiles;
 create policy profiles_admin_select
 on public.profiles
 for select
@@ -32,6 +33,7 @@ using (
 -- 2. STUDENTS
 -- ============================================================
 
+drop policy if exists students_admin_select on public.students;
 create policy students_admin_select
 on public.students
 for select
@@ -45,6 +47,7 @@ using (
 -- 3. STUDENT COURSE REGISTRATIONS
 -- ============================================================
 
+drop policy if exists registrations_admin_select on public.student_course_registrations;
 create policy registrations_admin_select
 on public.student_course_registrations
 for select
@@ -58,6 +61,7 @@ using (
 -- 4. EXAMS
 -- ============================================================
 
+drop policy if exists exams_admin_select on public.exams;
 create policy exams_admin_select
 on public.exams
 for select
@@ -71,6 +75,7 @@ using (
 -- 5. EXAM COURSES
 -- ============================================================
 
+drop policy if exists exam_courses_admin_select on public.exam_courses;
 create policy exam_courses_admin_select
 on public.exam_courses
 for select
@@ -89,6 +94,7 @@ using (
 -- in question_options, which deliberately has no SELECT policy.
 -- ============================================================
 
+drop policy if exists questions_admin_select on public.questions;
 create policy questions_admin_select
 on public.questions
 for select
@@ -102,6 +108,7 @@ using (
 -- 7. EXAM SESSIONS
 -- ============================================================
 
+drop policy if exists exam_sessions_admin_select on public.exam_sessions;
 create policy exam_sessions_admin_select
 on public.exam_sessions
 for select
@@ -115,6 +122,7 @@ using (
 -- 8. EXAM SESSION COURSES
 -- ============================================================
 
+drop policy if exists exam_session_courses_admin_select on public.exam_session_courses;
 create policy exam_session_courses_admin_select
 on public.exam_session_courses
 for select
@@ -128,6 +136,7 @@ using (
 -- 9. ANSWERS
 -- ============================================================
 
+drop policy if exists answers_admin_select on public.answers;
 create policy answers_admin_select
 on public.answers
 for select
@@ -141,6 +150,7 @@ using (
 -- 10. STRIKES
 -- ============================================================
 
+drop policy if exists strikes_admin_select on public.strikes;
 create policy strikes_admin_select
 on public.strikes
 for select
@@ -154,6 +164,7 @@ using (
 -- 11. TIME EXTENSIONS
 -- ============================================================
 
+drop policy if exists time_extensions_admin_select on public.time_extensions;
 create policy time_extensions_admin_select
 on public.time_extensions
 for select
@@ -167,6 +178,7 @@ using (
 -- 12. SUPERVISOR ALERTS
 -- ============================================================
 
+drop policy if exists supervisor_alerts_admin_select on public.supervisor_alerts;
 create policy supervisor_alerts_admin_select
 on public.supervisor_alerts
 for select
@@ -180,6 +192,7 @@ using (
 -- 13. EXAM SESSION EVENTS
 -- ============================================================
 
+drop policy if exists exam_session_events_admin_select on public.exam_session_events;
 create policy exam_session_events_admin_select
 on public.exam_session_events
 for select
@@ -198,6 +211,7 @@ using (
 -- examination results.
 -- ============================================================
 
+drop policy if exists exam_results_superadmin_select on public.exam_results;
 create policy exam_results_superadmin_select
 on public.exam_results
 for select
@@ -211,6 +225,7 @@ using (
 -- 15. RESULT EVENTS
 -- ============================================================
 
+drop policy if exists result_events_superadmin_select on public.result_events;
 create policy result_events_superadmin_select
 on public.result_events
 for select
@@ -224,6 +239,7 @@ using (
 -- 16. RESULT MAIL REQUESTS
 -- ============================================================
 
+drop policy if exists result_mail_requests_superadmin_select on public.result_mail_requests;
 create policy result_mail_requests_superadmin_select
 on public.result_mail_requests
 for select
@@ -237,6 +253,7 @@ using (
 -- 17. RESULT ACCESS EVENTS
 -- ============================================================
 
+drop policy if exists result_access_events_superadmin_select on public.result_access_events;
 create policy result_access_events_superadmin_select
 on public.result_access_events
 for select

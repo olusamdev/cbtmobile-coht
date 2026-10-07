@@ -1,3 +1,16 @@
+-- Replay safety: drop earlier versions whose return type or parameter names changed.
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname in ('superadmin_list_academic_sessions', 'superadmin_create_academic_session', 'superadmin_set_academic_session_current', 'superadmin_set_academic_session_active')
+  loop
+    execute 'drop function if exists ' || r.sig;
+  end loop;
+end $$;
+
 -- COHT CBT: academic session management RPCs
 -- Creates the RPCs required by the SuperAdmin Academic Structure page.
 

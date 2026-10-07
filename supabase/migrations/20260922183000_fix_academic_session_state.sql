@@ -1,3 +1,16 @@
+-- Replay safety: drop earlier versions whose return type or parameter names changed.
+do $$
+declare r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname in ('superadmin_list_academic_sessions', 'superadmin_create_academic_session', 'superadmin_set_current_academic_session')
+  loop
+    execute 'drop function if exists ' || r.sig;
+  end loop;
+end $$;
+
 -- COHT CBT: restore deterministic academic-session state management.
 -- Active and Current are separate flags. Multiple sessions may be active;
 -- only one session may be current.
