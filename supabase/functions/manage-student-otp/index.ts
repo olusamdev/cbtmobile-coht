@@ -5,6 +5,11 @@ const cors = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+const OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+type Admin = ReturnType<typeof serviceClient>;
+type StudentRow = { id: string; reg_no: string; full_name: string };
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -18,7 +23,17 @@ function serviceClient() {
   });
 }
 
-async function requireSuperAdmin(req: Request, admin: ReturnType<typeof serviceClient>) {
+function makeOtp() {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  // 256 is divisible by 32, so the modulo introduces no bias.
+  return Array.from(bytes, (b) => OTP_ALPHABET[b % OTP_ALPHABET.length]).join("");
+}
+
+function authEmail(regNo: string) {
+  return `${regNo.trim().toLowerCase()}@student.coht.local`;
+}
+
+async function requireSuperAdmin(req: Request, admin: Admin) {
   const token = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
   if (!token) throw new Error("Authentication required.");
 
@@ -35,28 +50,93 @@ async function requireSuperAdmin(req: Request, admin: ReturnType<typeof serviceC
   if (profile.role !== "superadmin") throw new Error("SuperAdmin authorization required.");
 }
 
+async function saveOtp(admin: Admin, studentId: string, otp: string) {
+  const { data: current } = await admin
+    .from("student_exam_otps")
+    .select("otp_epoch")
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  const now = new Date().toISOString();
+  const { error } = await admin.from("student_exam_otps").upsert(
+    {
+      student_id: studentId,
+      current_otp: otp,
+      otp_epoch: Number(current?.otp_epoch ?? 0) + 1,
+      valid_for_date: now.slice(0, 10),
+      issued_at: now,
+      updated_at: now,
+    },
+    { onConflict: "student_id" },
+  );
+  if (error) throw new Error(error.message);
+  return now;
+}
+
 /**
- * Returns the student's OTP for today, creating one when none exists for
- * today. Generation and the Auth password update both happen inside
- * public.rotate_student_otp, the same function the submission trigger uses.
+ * Creates the student's sign-in account and profile. Imports only create
+ * `students` rows, and a data reset removes the accounts, so accounts are
+ * provisioned here the first time an OTP is issued.
  */
-async function ensureCurrent(admin: ReturnType<typeof serviceClient>, student: { id: string; reg_no: string; full_name: string }) {
+async function provisionAccount(admin: Admin, student: StudentRow, otp: string) {
+  const email = authEmail(student.reg_no);
+
+  let userId: string;
+  const created = await admin.auth.admin.createUser({
+    email,
+    password: otp,
+    email_confirm: true,
+    user_metadata: { full_name: student.full_name, reg_no: student.reg_no },
+  });
+
+  if (created.error || !created.data.user) {
+    // The Auth user may already exist without a profile (an interrupted run).
+    const { data: existingId } = await admin.rpc("find_auth_user_id", { p_email: email });
+    if (!existingId) throw new Error(created.error?.message ?? "Could not create the sign-in account.");
+    userId = String(existingId);
+    const updated = await admin.auth.admin.updateUserById(userId, { password: otp });
+    if (updated.error) throw new Error(updated.error.message);
+  } else {
+    userId = created.data.user.id;
+  }
+
+  const { error: profileError } = await admin.from("profiles").upsert(
+    { id: userId, role: "student", student_id: student.id, display_name: student.full_name, is_active: true },
+    { onConflict: "id" },
+  );
+  if (profileError) throw new Error(`Profile could not be created: ${profileError.message}`);
+}
+
+/** Returns today's OTP for the student, creating the account or rotating as needed. */
+async function ensureCurrent(admin: Admin, student: StudentRow) {
   const today = new Date().toISOString().slice(0, 10);
 
-  const { data: existing } = await admin
-    .from("student_exam_otps")
-    .select("current_otp, valid_for_date, issued_at")
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("id")
     .eq("student_id", student.id)
     .maybeSingle();
 
-  if (existing?.current_otp && existing.valid_for_date === today) {
-    return { ...student, otp: existing.current_otp, issued_at: existing.issued_at };
+  if (profile) {
+    const { data: existing } = await admin
+      .from("student_exam_otps")
+      .select("current_otp, valid_for_date, issued_at")
+      .eq("student_id", student.id)
+      .maybeSingle();
+
+    if (existing?.current_otp && existing.valid_for_date === today) {
+      return { ...student, otp: existing.current_otp, issued_at: existing.issued_at };
+    }
+
+    const { data: otp, error } = await admin.rpc("rotate_student_otp", { p_student_id: student.id });
+    if (error) throw new Error(error.message);
+    return { ...student, otp: String(otp), issued_at: new Date().toISOString() };
   }
 
-  const { data: otp, error } = await admin.rpc("rotate_student_otp", { p_student_id: student.id });
-  if (error) throw new Error(error.message);
-
-  return { ...student, otp: String(otp), issued_at: new Date().toISOString() };
+  const otp = makeOtp();
+  await provisionAccount(admin, student, otp);
+  const issuedAt = await saveOtp(admin, student.id, otp);
+  return { ...student, otp, issued_at: issuedAt };
 }
 
 Deno.serve(async (req) => {
@@ -93,7 +173,7 @@ Deno.serve(async (req) => {
         const s = queue.shift();
         if (!s) break;
         try {
-          students.push(await ensureCurrent(admin, s));
+          students.push(await ensureCurrent(admin, { id: s.id, reg_no: s.reg_no, full_name: s.full_name }));
         } catch (e) {
           failures.push(`${s.reg_no}: ${e instanceof Error ? e.message : "OTP generation failed"}`);
         }
