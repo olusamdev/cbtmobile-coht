@@ -67,7 +67,6 @@ select pg_temp.try('superadmin_list_departments', 'select * from public.superadm
 select pg_temp.try('superadmin_list_student_departments', 'select * from public.superadmin_list_student_departments()');
 select pg_temp.try('superadmin_list_student_otps', 'select * from public.superadmin_list_student_otps(null, null)');
 select pg_temp.try('superadmin_clear_strikes', format('select public.superadmin_clear_strikes(%L, %L)', current_setting('s.sid'), 'recover'));
-select pg_temp.try('superadmin_set_instant_results', 'select public.superadmin_set_instant_results(true)');
 select pg_temp.try('superadmin_list_exams_for_question_bank', 'select * from public.superadmin_list_exams_for_question_bank()');
 select pg_temp.try('superadmin_update_exam (inactive path)', format($f$select public.superadmin_update_exam(%L, 'Smoke renamed', 45, false, true)$f$, current_setting('s.e')));
 

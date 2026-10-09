@@ -134,7 +134,10 @@ end $$;
 do $$
 declare r record;
 begin
+  -- students submit through submit_exam_paper_for_student; the scoring function is called directly here
+  execute 'reset role';
   select * into r from public.submit_exam_paper_v2(current_setting('t.sc')::uuid, gen_random_uuid());
+  execute 'set local role authenticated';
   assert r.all_papers_submitted = true and r.otp_rotation_required = true, 'regular submit ends the session';
   assert r.wrong_answers = 1 and r.correct_answers = 0, 'last saved answer (B, wrong) is scored';
 end $$;
@@ -187,7 +190,10 @@ begin
   select count(*), min(question_text) into n, q_text from public.get_exam_questions_v2(s1.exam_session_id, s2.exam_session_course_id);
   assert q_text = 'P2Q1', 'questions are for the active paper only, got ' || coalesce(q_text, 'null');
 
+  -- students submit through submit_exam_paper_for_student; the scoring function is called directly here
+  execute 'reset role';
   select * into r from public.submit_exam_paper_v2(s2.exam_session_course_id, gen_random_uuid());
+  execute 'set local role authenticated';
   assert r.all_papers_submitted = true, 'prenational submit ends every paper';
   perform set_config('t.pnsid', s1.exam_session_id::text, true);
 end $$;
