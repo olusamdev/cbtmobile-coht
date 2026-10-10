@@ -1,5 +1,7 @@
 -- Verifies that students only see results when the examination allows it.
 begin;
+select set_config('request.headers', '{"x-device-id":"test-device"}', true);
+insert into public.system_settings(key,value) values ('require_student_photo','false'::jsonb) on conflict (key) do update set value='false'::jsonb;
 
 do $$
 declare
@@ -29,9 +31,9 @@ select set_config('request.jwt.claim.sub', current_setting('t.u1'), true);
 do $$
 declare st record; r record;
 begin
-  select * into st from public.start_exam_paper_v2(current_setting('t.e')::uuid, current_setting('t.ec')::uuid);
+  select * into st from public.start_exam_paper_for_student(current_setting('t.e')::uuid, current_setting('t.ec')::uuid);
   perform set_config('t.sid', st.exam_session_id::text, true);
-  assert public.save_exam_answer_v2(st.exam_session_id, st.exam_session_course_id, current_setting('t.q')::uuid, current_setting('t.opt')::uuid);
+  assert public.save_exam_answer_for_student(st.exam_session_id, st.exam_session_course_id, current_setting('t.q')::uuid, current_setting('t.opt')::uuid);
 
   begin perform public.submit_exam_paper_v2(st.exam_session_course_id, gen_random_uuid()); raise exception 'direct v2 submit allowed';
   exception when insufficient_privilege then null; end;

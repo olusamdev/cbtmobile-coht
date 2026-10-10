@@ -2,6 +2,8 @@
 -- extension accounting, deadline enforcement and submission.
 -- Run against a scratch database; everything is rolled back at the end.
 begin;
+select set_config('request.headers', '{"x-device-id":"test-device"}', true);
+insert into public.system_settings(key,value) values ('require_student_photo','false'::jsonb) on conflict (key) do update set value='false'::jsonb;
 
 do $$
 declare
@@ -53,7 +55,7 @@ end $$;
 do $$
 declare s record; c record; started record;
 begin
-  select * into started from public.start_exam_paper_v2(current_setting('t.exam')::uuid, current_setting('t.ec')::uuid);
+  select * into started from public.start_exam_paper_for_student(current_setting('t.exam')::uuid, current_setting('t.ec')::uuid);
   perform set_config('t.sid', started.exam_session_id::text, true);
   perform set_config('t.sc', started.exam_session_course_id::text, true);
 
@@ -71,7 +73,7 @@ do $$
 declare opt uuid;
 begin
   opt := current_setting('t.optA')::uuid;
-  assert public.save_exam_answer_v2(current_setting('t.sid')::uuid, current_setting('t.sc')::uuid, current_setting('t.q')::uuid, opt), 'save should succeed';
+  assert public.save_exam_answer_for_student(current_setting('t.sid')::uuid, current_setting('t.sc')::uuid, current_setting('t.q')::uuid, opt), 'save should succeed';
 end $$;
 
 -- 4. Extension and pause accounting (superuser edits stand in for admin actions)
@@ -111,7 +113,7 @@ declare opt uuid;
 begin
   opt := current_setting('t.optB')::uuid;
   begin
-    perform public.save_exam_answer_v2(current_setting('t.sid')::uuid, current_setting('t.sc')::uuid, current_setting('t.q')::uuid, opt);
+    perform public.save_exam_answer_for_student(current_setting('t.sid')::uuid, current_setting('t.sc')::uuid, current_setting('t.q')::uuid, opt);
     raise exception 'save after the deadline was accepted';
   exception when others then
     assert sqlerrm = 'Time is up for this examination paper', 'unexpected error: ' || sqlerrm;
@@ -127,7 +129,7 @@ do $$
 declare opt uuid;
 begin
   opt := current_setting('t.optB')::uuid;
-  assert public.save_exam_answer_v2(current_setting('t.sid')::uuid, current_setting('t.sc')::uuid, current_setting('t.q')::uuid, opt), 'save after extension should succeed';
+  assert public.save_exam_answer_for_student(current_setting('t.sid')::uuid, current_setting('t.sc')::uuid, current_setting('t.q')::uuid, opt), 'save after extension should succeed';
 end $$;
 
 -- 6. Late submission is still scored; regular mode ends the session
@@ -177,9 +179,9 @@ select set_config('request.jwt.claim.sub', current_setting('t.user'), true);
 do $$
 declare s1 record; s2 record; st record; n integer; r record; q_text text;
 begin
-  select * into s1 from public.start_exam_paper_v2(current_setting('t.pnexam')::uuid, current_setting('t.pnec1')::uuid);
+  select * into s1 from public.start_exam_paper_for_student(current_setting('t.pnexam')::uuid, current_setting('t.pnec1')::uuid);
   assert s1.mode = 'pharmacy_prenational' and s1.global_expires_at is not null, 'prenational has a global deadline';
-  select * into s2 from public.start_exam_paper_v2(current_setting('t.pnexam')::uuid, current_setting('t.pnec2')::uuid);
+  select * into s2 from public.start_exam_paper_for_student(current_setting('t.pnexam')::uuid, current_setting('t.pnec2')::uuid);
   assert s2.exam_session_id = s1.exam_session_id, 'switching papers stays in the same session';
   assert s2.global_expires_at = s1.global_expires_at, 'the deadline is shared and does not reset on switch';
 
@@ -187,7 +189,7 @@ begin
   assert st.active_exam_session_course_id = s2.exam_session_course_id, 'second paper is now active';
   assert jsonb_array_length(st.papers) = 2, 'state lists both papers';
 
-  select count(*), min(question_text) into n, q_text from public.get_exam_questions_v2(s1.exam_session_id, s2.exam_session_course_id);
+  select count(*), min(question_text) into n, q_text from public.get_exam_questions_for_student(s1.exam_session_id, s2.exam_session_course_id);
   assert q_text = 'P2Q1', 'questions are for the active paper only, got ' || coalesce(q_text, 'null');
 
   -- students submit through submit_exam_paper_for_student; the scoring function is called directly here

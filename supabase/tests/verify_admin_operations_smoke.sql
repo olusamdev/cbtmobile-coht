@@ -2,6 +2,8 @@
 -- scenario, and fails on the first runtime error (ambiguous columns, type mismatches,
 -- missing columns). Rolled back at the end.
 begin;
+select set_config('request.headers', '{"x-device-id":"test-device"}', true);
+insert into public.system_settings(key,value) values ('require_student_photo','false'::jsonb) on conflict (key) do update set value='false'::jsonb;
 create or replace function pg_temp.try(label text, q text) returns void language plpgsql as $$
 begin execute q; raise notice 'OK    %', label;
 exception when others then raise exception 'SMOKE FAILURE in %: %', label, sqlerrm; end $$;
@@ -24,8 +26,8 @@ begin
   insert into public.questions(exam_id,exam_course_id,question_number,question_text) values (v_e,v_ec,1,'Q') returning id into v_q;
   insert into public.question_options(question_id,option_key,option_text,is_correct) values (v_q,'A','a',true),(v_q,'B','b',false);
   perform public.superadmin_assign_admin_paper(v_ad, v_ec) from (select set_config('request.jwt.claim.sub', v_su::text, true)) x;
-  perform set_config('request.jwt.claim.sub', v_u1::text, true); select * into st from public.start_exam_paper_v2(v_e, v_ec);
-  perform set_config('request.jwt.claim.sub', v_u2::text, true); select * into st2 from public.start_exam_paper_v2(v_e, v_ec);
+  perform set_config('request.jwt.claim.sub', v_u1::text, true); select * into st from public.start_exam_paper_for_student(v_e, v_ec);
+  perform set_config('request.jwt.claim.sub', v_u2::text, true); select * into st2 from public.start_exam_paper_for_student(v_e, v_ec);
   perform set_config('s.su', v_su::text, true); perform set_config('s.ad', v_ad::text, true);
   perform set_config('s.sid', st.exam_session_id::text, true); perform set_config('s.sc', st.exam_session_course_id::text, true);
   perform set_config('s.sid2', st2.exam_session_id::text, true); perform set_config('s.sc2', st2.exam_session_course_id::text, true);

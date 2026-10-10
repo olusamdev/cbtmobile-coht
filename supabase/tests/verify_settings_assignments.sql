@@ -1,5 +1,7 @@
 -- Verifies the active-only assignment list, bulk time extension, and removal of the global mode setting.
 begin;
+select set_config('request.headers', '{"x-device-id":"test-device"}', true);
+insert into public.system_settings(key,value) values ('require_student_photo','false'::jsonb) on conflict (key) do update set value='false'::jsonb;
 
 do $$
 declare
@@ -46,7 +48,7 @@ begin
     ec := case when u = 't.u3' then 't.eb' else 't.ea' end;
     perform set_config('request.jwt.claim.sub', current_setting(u), true);
     execute 'set local role authenticated';
-    select * into st from public.start_exam_paper_v2(current_setting('t.e')::uuid, current_setting(ec)::uuid);
+    select * into st from public.start_exam_paper_for_student(current_setting('t.e')::uuid, current_setting(ec)::uuid);
     execute 'reset role';
     perform set_config('t.sid_' || u, st.exam_session_id::text, true);
   end loop;

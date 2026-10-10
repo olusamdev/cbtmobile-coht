@@ -1,6 +1,8 @@
 -- Verifies the expiry sweeper, the corrected force-submit, and persistent flags.
 -- Run against a scratch database; everything is rolled back at the end.
 begin;
+select set_config('request.headers', '{"x-device-id":"test-device"}', true);
+insert into public.system_settings(key,value) values ('require_student_photo','false'::jsonb) on conflict (key) do update set value='false'::jsonb;
 
 do $$
 declare
@@ -56,10 +58,10 @@ select set_config('request.jwt.claim.sub', current_setting('t.u1'), true);
 do $$
 declare st record;
 begin
-  select * into st from public.start_exam_paper_v2(current_setting('t.e1')::uuid, current_setting('t.ec1')::uuid);
+  select * into st from public.start_exam_paper_for_student(current_setting('t.e1')::uuid, current_setting('t.ec1')::uuid);
   perform set_config('t.sid1', st.exam_session_id::text, true);
   perform set_config('t.sc1', st.exam_session_course_id::text, true);
-  assert public.save_exam_answer_v2(st.exam_session_id, st.exam_session_course_id, current_setting('t.q1')::uuid, current_setting('t.q1A')::uuid);
+  assert public.save_exam_answer_for_student(st.exam_session_id, st.exam_session_course_id, current_setting('t.q1')::uuid, current_setting('t.q1A')::uuid);
 end $$;
 reset role;
 
@@ -92,7 +94,7 @@ select set_config('request.jwt.claim.sub', current_setting('t.u2'), true);
 do $$
 declare st record;
 begin
-  select * into st from public.start_exam_paper_v2(current_setting('t.e1')::uuid, current_setting('t.ec1')::uuid);
+  select * into st from public.start_exam_paper_for_student(current_setting('t.e1')::uuid, current_setting('t.ec1')::uuid);
   perform set_config('t.sid2', st.exam_session_id::text, true);
   perform set_config('t.sc2', st.exam_session_course_id::text, true);
 end $$;
@@ -125,12 +127,12 @@ select set_config('request.jwt.claim.sub', current_setting('t.u1'), true);
 do $$
 declare st record; v_sc_a uuid; v_sc_b uuid;
 begin
-  select * into st from public.start_exam_paper_v2(current_setting('t.e2')::uuid, current_setting('t.ec2a')::uuid);
+  select * into st from public.start_exam_paper_for_student(current_setting('t.e2')::uuid, current_setting('t.ec2a')::uuid);
   perform set_config('t.sid3', st.exam_session_id::text, true);
   select id into v_sc_a from public.exam_session_courses where exam_session_id = st.exam_session_id and exam_course_id = current_setting('t.ec2a')::uuid;
   select id into v_sc_b from public.exam_session_courses where exam_session_id = st.exam_session_id and exam_course_id = current_setting('t.ec2b')::uuid;
   perform set_config('t.sc3a', v_sc_a::text, true); perform set_config('t.sc3b', v_sc_b::text, true);
-  assert public.save_exam_answer_v2(st.exam_session_id, v_sc_a, current_setting('t.qa1')::uuid, current_setting('t.qa1A')::uuid);
+  assert public.save_exam_answer_for_student(st.exam_session_id, v_sc_a, current_setting('t.qa1')::uuid, current_setting('t.qa1A')::uuid);
 
   -- ---- E. Flags
   perform public.set_exam_question_flag(st.exam_session_id, current_setting('t.qa1')::uuid, true);
